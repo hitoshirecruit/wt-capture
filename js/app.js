@@ -7,7 +7,7 @@
   // ---- DOM参照 ----
   const video         = document.getElementById('video');
   const canvas        = document.getElementById('canvas');
-  const ctx           = canvas.getContext('2d', { alpha: false }); // alpha:false で高速化
+  const ctx           = canvas.getContext('2d', { alpha: false });
   const screenSelect  = document.getElementById('screen-select');
   const screenCamera  = document.getElementById('screen-camera');
   const exerciseLabel = document.getElementById('exercise-label');
@@ -23,11 +23,40 @@
   let frameCount      = 0;
   let lastKeypoints   = null;
 
+  // ---- Canvasをスクリーンにフィット（縦横比を保持・黒帯あり）----
+  function fitCanvas() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (!canvas.width || !canvas.height) return;
+
+    const videoAspect  = canvas.width / canvas.height;
+    const screenAspect = vw / vh;
+
+    let w, h;
+    if (screenAspect > videoAspect) {
+      // 画面の方が横長 → 高さに合わせる
+      h = vh;
+      w = vh * videoAspect;
+    } else {
+      // 画面の方が縦長 → 幅に合わせる
+      w = vw;
+      h = vw / videoAspect;
+    }
+
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
+    canvas.style.left   = ((vw - w) / 2) + 'px';
+    canvas.style.top    = ((vh - h) / 2) + 'px';
+  }
+
+  window.addEventListener('resize', fitCanvas);
+  window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 300));
+
   // ---- カメラ初期化 ----
   async function startCamera() {
     const constraints = {
       video: {
-        facingMode: { ideal: 'environment' }, // 後カメラ優先
+        facingMode: { ideal: 'environment' },
         width:  { ideal: 1280, max: 1280 },
         height: { ideal: 720,  max: 720  },
         frameRate: { ideal: 30 },
@@ -45,16 +74,17 @@
       });
       await video.play();
 
-      // Canvasサイズをビデオの実際の解像度に合わせる
+      // Canvas内部解像度をビデオに合わせる
       canvas.width  = video.videoWidth;
       canvas.height = video.videoHeight;
+      fitCanvas();
 
       return true;
     } catch (err) {
       const msg = err.name === 'NotAllowedError'
-        ? 'カメラの使用を許可してください。\nSafariの設定 > カメラ で許可できます。'
+        ? 'カメラを許可してください\nSafari設定 > カメラ'
         : `カメラエラー: ${err.message}`;
-      alert(msg);
+      modelStatus.textContent = msg;
       return false;
     }
   }
@@ -67,26 +97,27 @@
     }
   }
 
-  // ---- 軽量アニメーションループ ----
-  // 30fps でレンダリング、3フレームに1回（約10fps）だけ推論
+  // ---- アニメーションループ ----
+  // カメラ映像はモデル不要で即表示。モデルが準備できたら骨格を重ねる。
   function animationLoop() {
     animationId = requestAnimationFrame(animationLoop);
 
-    // 推論は3フレームに1回のみ（awaitを使わず非同期で流す）
-    if (frameCount % 3 === 0) {
+    // モデル準備済みのときだけ推論（3フレームに1回）
+    if (isModelReady && frameCount % 3 === 0) {
       PoseDetector.detect(video).then(kps => {
         lastKeypoints = kps;
       });
     }
     frameCount++;
 
-    // 毎フレームレンダリング（前フレームのキーポイントを使い回す）
-    const angles = lastKeypoints
+    const angles = (isModelReady && lastKeypoints)
       ? AngleCalculator.getAngles(lastKeypoints, currentExercise)
       : null;
 
     Renderer.drawFrame(
-      ctx, video, lastKeypoints, angles, currentExercise,
+      ctx, video,
+      isModelReady ? lastKeypoints : null,
+      angles, currentExercise,
       canvas.width, canvas.height
     );
   }
@@ -110,23 +141,30 @@
     btn.addEventListener('click', async () => {
       currentExercise = btn.dataset.exercise;
       exerciseLabel.textContent = EXERCISE_NAMES[currentExercise];
-      frameCount = 0;
+      frameCount    = 0;
       lastKeypoints = null;
       showScreen('camera');
 
-      // カメラとモデル初期化を並列実行
-      const [cameraOk] = await Promise.all([
-        startCamera(),
-        isModelReady
-          ? Promise.resolve(true)
-          : PoseDetector.init(msg => { modelStatus.textContent = msg; })
-            .then(ok => { isModelReady = ok; return ok; }),
-      ]);
+      // ── Step1: カメラを先に起動 ──
+      modelStatus.textContent = 'カメラ起動中...';
+      const cameraOk = await startCamera();
 
-      if (cameraOk && isModelReady) {
+      if (!cameraOk) return; // カメラ失敗 → ここで止まる
+
+      // カメラOK → すぐにループ開始・RECボタン有効化
+      animationLoop();
+      btnRecord.disabled = false;
+
+      // ── Step2: モデルをバックグラウンドで読み込む ──
+      if (!isModelReady) {
+        modelStatus.textContent = 'AI読み込み中...';
+        const ok = await PoseDetector.init(msg => {
+          modelStatus.textContent = msg;
+        });
+        isModelReady = ok;
+        modelStatus.textContent = ok ? '準備完了' : 'AI読み込み失敗（録画のみ可）';
+      } else {
         modelStatus.textContent = '準備完了';
-        btnRecord.disabled = false;
-        animationLoop();
       }
     });
   });
@@ -134,7 +172,6 @@
   // ---- RECボタン ----
   btnRecord.addEventListener('click', async () => {
     if (!Recorder.isRecording()) {
-      // 録画開始
       Recorder.startRecording(canvas, (time) => {
         recordTimer.textContent = time;
       });
@@ -142,7 +179,6 @@
       btnRecord.classList.add('recording');
       recordTimer.classList.remove('hidden');
     } else {
-      // 録画停止
       btnRecord.disabled = true;
       await Recorder.stopRecording(currentExercise);
       btnRecord.textContent = 'REC';
@@ -160,21 +196,19 @@
       await Recorder.stopRecording(currentExercise);
     }
 
-    // アニメーション停止
     if (animationId) {
       cancelAnimationFrame(animationId);
       animationId = null;
     }
 
     stopCamera();
+    lastKeypoints = null;
 
-    // ボタン状態リセット
     btnRecord.textContent = 'REC';
     btnRecord.classList.remove('recording');
     btnRecord.disabled = true;
     recordTimer.classList.add('hidden');
     recordTimer.textContent = '00:00';
-    lastKeypoints = null;
 
     showScreen('select');
   });

@@ -138,11 +138,10 @@ button {
   display: none;
 }
 
-/* 描画Canvas（全画面表示）*/
+/* 描画Canvas（JSでサイズ・位置を制御するためposition:absoluteのみ設定）*/
 #canvas {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  position: absolute;
+  /* 幅・高さ・left・top はapp.js内のfitCanvas()で設定 */
 }
 
 /* =============================
@@ -151,14 +150,15 @@ button {
 #ui-overlay {
   position: absolute;
   inset: 0;
+  z-index: 10; /* Canvasより必ず前面に */
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   /* iPhoneセーフエリア */
-  padding-top:    max(12px, env(safe-area-inset-top));
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
-  padding-left:   max(12px, env(safe-area-inset-left));
-  padding-right:  max(12px, env(safe-area-inset-right));
+  padding-top:    max(16px, env(safe-area-inset-top));
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  padding-left:   max(16px, env(safe-area-inset-left));
+  padding-right:  max(16px, env(safe-area-inset-right));
   pointer-events: none; /* Canvas操作を通過させる */
 }
 
@@ -244,9 +244,10 @@ button {
   transform: scale(0.93);
 }
 #btn-record:disabled {
-  background: #555;
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #888;
+  background: #333;
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #aaa;
+  font-size: 11px;
 }
 #btn-record.recording {
   background: #fff;
