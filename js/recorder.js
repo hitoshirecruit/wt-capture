@@ -37,7 +37,7 @@ const Recorder = (() => {
     const stream = canvas.captureStream(fps);
     const mimeType = getSupportedMimeType();
 
-    const options = { videoBitsPerSecond: 4_000_000 }; // 4Mbps
+    const options = { videoBitsPerSecond: 1_500_000 }; // 1.5Mbps（モーション分析用途に最適化）
     if (mimeType) options.mimeType = mimeType;
 
     mediaRecorder = new MediaRecorder(stream, options);
