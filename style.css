@@ -37,7 +37,8 @@ button {
 .screen {
   display: none;
   width: 100vw;
-  height: 100vh;
+  height: 100vh;        /* フォールバック */
+  height: 100dvh;       /* iOS Safari対応: ツールバーを除いた実際の高さ */
 }
 .screen.active {
   display: flex;
